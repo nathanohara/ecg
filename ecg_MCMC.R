@@ -271,10 +271,16 @@ dc_one_samp <- function(dc_curr, DC, s) {
 
 samples <- read_csv("samples.csv", skip = 1)
 colnames(samples) <- c("time", "signal")
-S <- 10000
+samples_longterm <- read_csv("samples_longterm.csv", skip = 1)
+colnames(samples_healthy) <- c("time", "signal")
+samples_sinus <- read_csv("samples_normal_sinus_rythmn.csv", skip = 1)
+colnames(samples_sinus) <- c("time", "signal")
+S <- 5000
 burn <- 5000
-y <- samples$signal
-t <- samples$time
+#y <- samples$signal[76:662] #signal	0.208 max(samples$signal[0:250]) which(samples$signal[0:250] == 0.58)
+#t <- samples$time[76:662] #signal 0.705 max(samples$signal[0:700]) which(samples$signal[0:700] == 0.705)
+y <- samples_sinus$signal[55:210]
+t <- samples_sinus$time[55:210]
 beta_curr <- 1
 alpha_curr <- rep(1, 12)
 delta_curr<- seq(0, max(t), length.out = 17) 
