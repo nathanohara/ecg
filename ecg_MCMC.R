@@ -1,4 +1,4 @@
-proposal_sd <- 10 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+proposal_sd <- 0.5 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
 
 # this proposal pdf function is in Jordan's lab code but I think we dont need to calculate this in this case cause we assume symmetric proposal 
 proposal_lpdf <- function(theta_curr){
@@ -18,14 +18,19 @@ likelihood_lpdf <- function(y, mean, tao){
   lpdf <- 0
   K <- length(y)
   for(k in 1:K){
+    #print(c("k", k))
+    #print(c("MEAN", mean[k]))
+    #print(c("y", y[k]))
+    #print(c("DNORM", dnorm(y[k], mean = mean[k], sd = 1 / sqrt(tao), log = T)))
     lpdf <- lpdf + dnorm(y[k], mean = mean[k], sd = 1 / sqrt(tao), log = T)
+    #print(lpdf)
   }
   return(lpdf)
 }
 
 # this function calculates the new miu based on the updated theta, theta_star
 gen_miu_star <- function(t, alpha_curr, beta_curr, delta_curr) {
-  miu_star <- rep(0, 1800)
+  miu_star <- rep(0, length(y))
   for (i in 1:length(t)){
     if (0 < t[i] && t[i] < delta_curr[1]) {
       miu_star[i] <- alpha_curr[1] * cos(pi * t[i] / delta_curr[1]) + beta_curr
@@ -139,9 +144,7 @@ beta_one_samp <- function(beta_curr, BETA, s) {
   
   #print(r)  
   if(runif(1) < r){
-    if(s > burn){
-      beta_curr <- beta_star
-    }
+    beta_curr <- beta_star
   }
   BETA <- c(BETA, beta_curr)
   return (list(beta_curr, BETA))
@@ -171,9 +174,7 @@ alpha_one_samp <- function(i, alpha_i_curr, ALPHA_i, s) {
   #print(c("R: ", r))
   
   if(runif(1) < r){
-    if(s > burn){
-      alpha_i_curr <- alpha_i_star
-    }
+    alpha_i_curr <- alpha_i_star
   }
   ALPHA_i <- c(ALPHA_i, alpha_i_curr)
   return (list(alpha_i_curr, ALPHA_i))
@@ -196,12 +197,10 @@ delta_one_samp <- function(delta_i_curr, delta_i_before, delta_i_next, DELTA_i, 
     mean_star <- miu_star + dc_curr 
     
     #
-    r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + prior_lpdf(delta_i_star) - prior_lpdf(delta_i_curr))
+    r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + dunif(delta_i_star, delta_i_before, delta_i_next, log = T) - dunif(delta_i_curr, delta_i_before, delta_i_next, log = T)) 
     
     if(runif(1) < r){
-      if(s > burn){
-        delta_i_curr <- delta_i_star
-      }
+      delta_i_curr <- delta_i_star
     }
   } 
   
@@ -227,13 +226,22 @@ tao_one_samp <- function(tao_curr, TAO, s) {
   print(r)
  
   if(runif(1) < r){
-    if(s > burn){
-      tao_curr <- tao_star
-    }
+    tao_curr <- tao_star
   }
   TAO <- c(TAO, tao_curr)
   return (list(tao_curr, TAO))
 }
+
+tao_one_samp_cond <- function(tao_curr, TAO, s) {
+  #generate candidate value
+  shape_star <- 0.5 * (length(y) + 0.02)
+  sum_diff <- sum( (y - mean_curr)^2 )
+  rate_star <- 0.5 * (0.02 + sum_diff)
+  tao_curr <- rgamma(1, shape_star, rate_star)
+  TAO <- c(TAO, tao_curr)
+  return (list(tao_curr, TAO))
+}
+
 
 #function for generating samples for DC
 
@@ -252,9 +260,7 @@ dc_one_samp <- function(dc_curr, DC, s) {
   
   #print(r)  
   if(runif(1) < r){
-    if(s > burn){
-      dc_curr <- dc_star
-    }
+    dc_curr <- dc_star
   }
   DC <- c(DC, dc_curr)
   return (list(dc_curr, DC))
@@ -263,18 +269,19 @@ dc_one_samp <- function(dc_curr, DC, s) {
 
 #Initiate 
 
-hr_data_1 <- read.table("~/projects/STA360-Final_Project/hr_data_1.11839", quote="\"", comment.char="")
+samples <- read_csv("samples.csv", skip = 1)
+colnames(samples) <- c("time", "signal")
 S <- 10000
 burn <- 5000
-y <- hr_data_1$V1
-t <- seq(0, 900, length.out = 1800)
+y <- samples$signal
+t <- samples$time
 beta_curr <- 1
 alpha_curr <- rep(1, 12)
-delta_curr<- seq(20, 860, length.out = 17) 
-end_time <- 900
-tao_curr <- 0.01
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
 mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
-dc_curr <- 5
+dc_curr <- 0.5
 miu_curr <- mean_curr - dc_curr
 
 #storage
@@ -284,15 +291,17 @@ ALPHA <- rep(list(NULL), 12)
 BETA <- NULL
 DELTA <- rep(list(NULL), 17)
 TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
 
 for(s in 1:S) {
+  print(c("s: ", s))
   
   #1 draw of Beta
   
   beta_lst <- beta_one_samp(beta_curr, BETA, s)
   beta_curr <- beta_lst[[1]]
   BETA <- beta_lst[[2]]
-  
+  print(c("beta: ", beta_curr))
   
   #1 draw of Alphas (1-12)
   
@@ -301,6 +310,8 @@ for(s in 1:S) {
     alpha_curr[k] <- alpha_lst[[1]]
     ALPHA[[k]] <- alpha_lst[[2]]
   }
+  
+  print(c("ALPHA: ", alpha_curr))
   
   #1 draw of Deltas (1-17)
   
@@ -314,19 +325,19 @@ for(s in 1:S) {
     DELTA[[k]] <- delta_lst[[2]]
   }
   
-  delta_lst <- delta_one_samp(delta_curr[17], end_time,  DELTA[[17]], s)
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
   delta_curr[17] <- delta_lst[[1]]
   DELTA[[17]] <- delta_lst[[2]]
   
+  print(c("DELTA: ", delta_curr))
+  
   
   #1 draw of Tao 
-  tao_lst <- tao_one_samp(tao_curr, TAO, s)
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
   tao_curr <- tao_lst[[1]]
   TAO <- tao_lst[[2]]
-  
-  #if s > burnin{
-    tao_curr <- rgamma(a* , b* )
-  }
+
+  print(c("TAO: ", tao_curr))
   
   
   #1 draw of DC 
@@ -334,4 +345,12 @@ for(s in 1:S) {
   dc_curr <- dc_lst[[1]]
   DC <- dc_lst[[2]]
   
+  print(c("DC: ", dc_curr))
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
 }
