@@ -324,6 +324,10 @@ for(s in 1:S) {
   tao_curr <- tao_lst[[1]]
   TAO <- tao_lst[[2]]
   
+  #if s > burnin{
+    tao_curr <- rgamma(a* , b* )
+  }
+  
   
   #1 draw of DC 
   dc_lst <- dc_one_samp(dc_curr, DC, s)
