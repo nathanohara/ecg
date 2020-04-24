@@ -16,7 +16,7 @@ library(purrr)
 ```
 
 ```{r metropolis-functions, echo=FALSE}
-proposal_sd <- 0.5 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
 
 # this proposal pdf function is in Jordan's lab code but I think we dont need to calculate this in this case cause we assume symmetric proposal 
 proposal_lpdf <- function(theta_curr){
@@ -56,7 +56,7 @@ gen_miu_star <- function(t, alpha_curr, beta_curr, delta_curr) {
     
     
     if (delta_curr[1] < t[i] && t[i] < delta_curr[2]) {
-      miu_star[i] <- alpha_curr[2] * (1 - cos(pi * t[i] * (t[i] - delta_curr[1]) / (delta_curr[2]-delta_curr[1]))) + beta_curr - alpha_curr[1]
+      miu_star[i] <- alpha_curr[2] * (1 - cos(pi * (t[i] - delta_curr[1]) / (delta_curr[2]-delta_curr[1]))) + beta_curr - alpha_curr[1]
     }
     
     
@@ -471,7 +471,7 @@ samples_arr <- read_csv("samples.csv", skip = 1)
 colnames(samples_arr) <- c("time", "signal")
 y <- samples_arr$signal[76:662] #signal	0.208 max(samples$signal[0:250]) which(samples$signal[0:250] == 0.58)
 t <- samples_arr$time[76:662] #signal 0.705 max(samples$signal[0:700]) which(samples$signal[0:700] == 0.705)
-S <- 5000
+S <- 3000
 burn <- 5000
 beta_curr <- 1
 alpha_curr <- rep(1, 12)
