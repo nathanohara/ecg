@@ -1,0 +1,290 @@
+---
+title: "ECG_Writeup"
+author: "Lyndon"
+date: "4/24/2020"
+output: html_document
+---
+
+```{r libraries}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(knitr)
+library(gridExtra)
+```
+
+```{r metropolis-functions}
+read_chunk('ecg_MCMC.R')
+```
+
+```{r initialization-healthy}
+samples_sinus <- read_csv("samples_normal_sinus_rythmn.csv", skip = 1)
+colnames(samples_sinus) <- c("time", "signal")
+S <- 5000
+burn <- 5000
+y <- samples_sinus$signal[55:210]
+t <- samples_sinus$time[55:210]
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-healthy}
+for(s in 1:S) {
+  print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+```
+
+```{r healthy-mcmc-df}
+pred_mean_healthy <- unlist(map(MEAN, mean))
+
+pred_df_healthy = tibble(
+  time = t,
+  pred_rate = pred_mean_healthy,
+  emp_rate = y
+)
+```
+
+```{r healthy-ecg-simulated}
+pred_df_healthy %>% 
+  ggplot() +
+  geom_line(aes(x = time, y = emp_rate), col = "blue") +
+  geom_line(aes(x = time, y = pred_rate), col = "orange")
+```
+
+```{r healthy-parameter-diagnostics}
+par(mfrow = c(3, 2))
+for(j in sample(12, 3)){
+  plot(ALPHA[[j]], type = 'l', ylab = paste("Alpha", j), xlab = "Iter", col = "purple",
+       main = paste("Acceptance ratio =", round(length(unique(ALPHA[[j]])) / S, 3)))
+  acf(ALPHA[[j]], ylab = paste("Alpha", j), main = paste("Series Alpha", j))
+}
+
+par(mfrow = c(3, 2))
+for(j in sample(17, 3)){
+  plot(DELTA[[j]], type = 'l', ylab = paste("Delta", j), xlab = "Iter", col = "purple",
+       main = paste("Acceptance ratio =", round(length(unique(DELTA[[j]])) / S, 3)))
+  acf(DELTA[[j]], ylab = paste("Delta", j), main = paste("Series Delta", j))
+}
+
+par(mfrow = c(1,2))
+plot(DC, type = 'l', ylab = "DC", xlab = "Iter", col = "purple",
+       main = paste("Acceptance ratio =", round(length(unique(DC)) / S, 3)))
+acf(DC, ylab = "DC", main = "Series DC")
+
+par(mfrow = c(1,2))
+plot(TAO, type = 'l', ylab = "Tao", xlab = "Iter", col = "purple",
+    main = paste("Acceptance ratio =", round(length(unique(TAO)) / S, 3)))
+acf(TAO, ylab = "Tao", main = "Series Tao")
+```
+
+```{r healthy-alpha-posterior}
+alpha_names <- map_chr(1:12, function(x) str_c("alpha_", x, sep = ""))
+alpha_df <- map_dfc(ALPHA, function(x) x)
+colnames(alpha_df) <- alpha_names
+
+alpha_df <- alpha_df %>%
+  pivot_longer(1:12, names_to = "index", values_to = "alpha_1") %>%
+  mutate(index = factor(index, levels = alpha_names))
+
+colnames(alpha_df)[2] <- "value"
+
+alpha_df %>%
+  filter(index %in% alpha_names[1:6]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+
+alpha_df %>%
+  filter(index %in% alpha_names[7:12]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+```
+
+```{r healthy-delta-posterior}
+
+delta_names <- map_chr(1:17, function(x) str_c("delta_", x, sep = ""))
+delta_df <- map_dfc(DELTA, function(x) x)
+colnames(delta_df) <- delta_names
+
+delta_df <- delta_df %>%
+  pivot_longer(1:17, names_to = "index", values_to = "delta_1") %>%
+  mutate(index = factor(index, levels = delta_names))
+
+colnames(delta_df)[2] <- "value"
+
+delta_df %>%
+  filter(index %in% delta_names[1:6]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+
+delta_df %>%
+  filter(index %in% delta_names[7:12]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+
+delta_df %>%
+  filter(index %in% delta_names[13:17]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+```
+
+```{r healthy-normal-param-posterior}
+for(j in sample(length(MEAN), 6)){
+  plot_2d <- ggplot() +
+    geom_point(aes(x = MEAN[[j]], y = TAO)) +
+    geom_density_2d(aes(x = MEAN[[j]], y = TAO))
+  
+  print(plot_2d)
+}
+```
+
+```{r initialization-arrhythmia}
+samples <- read_csv("samples.csv", skip = 1)
+colnames(samples) <- c("time", "signal")
+y <- samples$signal[76:662] #signal	0.208 max(samples$signal[0:250]) which(samples$signal[0:250] == 0.58)
+t <- samples$time[76:662] #signal 0.705 max(samples$signal[0:700]) which(samples$signal[0:700] == 0.705)
+S <- 5000
+burn <- 5000
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-arrhythmia}
+for(s in 1:S) {
+  print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  print(c("beta: ", beta_curr))
+  
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  print(c("ALPHA: ", alpha_curr))
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  print(c("DELTA: ", delta_curr))
+  
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  print(c("TAO: ", tao_curr))
+  
+  
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  print(c("DC: ", dc_curr))
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+
+```
