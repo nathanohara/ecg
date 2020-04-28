@@ -1,0 +1,946 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r libraries}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(knitr)
+library(gridExtra)
+library(stringr)
+library(purrr)
+library(readr)
+library(parallel)
+```
+
+```{r metropolis-functions, echo=FALSE}
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+
+# this proposal pdf function is in Jordan's lab code but I think we dont need to calculate this in this case cause we assume symmetric proposal 
+proposal_lpdf <- function(theta_curr){
+  lpdf <- dnorm(theta_curr, proposal_sd)
+  return(lpdf)
+}
+
+# prior pdf for all model parameters (used gamma(0.01,0.01) for uninformative prior)
+prior_lpdf <- function(theta){
+  lpdf <- dnorm(theta, proposal_sd, log = T)
+  return(lpdf)
+}
+
+
+# likelihood pdf for all model parameters 
+likelihood_lpdf <- function(y, mean, tao){
+  lpdf <- 0
+  K <- length(y)
+  for(k in 1:K){
+    #print(c("k", k))
+    #print(c("MEAN", mean[k]))
+    #print(c("y", y[k]))
+    #print(c("DNORM", dnorm(y[k], mean = mean[k], sd = 1 / sqrt(tao), log = T)))
+    lpdf <- lpdf + dnorm(y[k], mean = mean[k], sd = 1 / sqrt(tao), log = T)
+    #print(lpdf)
+  }
+  return(lpdf)
+}
+
+# this function calculates the new miu based on the updated theta, theta_star
+gen_miu_star <- function(t, alpha_curr, beta_curr, delta_curr) {
+  miu_star <- rep(0, length(y))
+  for (i in 1:length(t)){
+    if (0 < t[i] && t[i] < delta_curr[1]) {
+      miu_star[i] <- alpha_curr[1] * cos(pi * t[i] / delta_curr[1]) + beta_curr
+    }
+    
+    
+    if (delta_curr[1] < t[i] && t[i] < delta_curr[2]) {
+      miu_star[i] <- alpha_curr[2] * (1 - cos(pi * (t[i] - delta_curr[1]) / (delta_curr[2]-delta_curr[1]))) + beta_curr - alpha_curr[1]
+    }
+    
+    
+    if (delta_curr[2] < t[i] && t[i] < delta_curr[3]) {
+      miu_star[i] <- alpha_curr[3] * (1 - cos(pi * (t[i] - delta_curr[2]) / (delta_curr[3]-delta_curr[2]))) + beta_curr - alpha_curr[1] + 2 * alpha_curr[2]
+    }
+    
+    
+    if (delta_curr[3] < t[i] && t[i] < delta_curr[4]) {
+      miu_star[i] <- 0.5 * (beta_curr - alpha_curr[1] + 2 * alpha_curr[2] + 2 * alpha_curr[3]) * (1 + cos(pi * (t[i] - delta_curr[3]) / (delta_curr[4]-delta_curr[3])))
+    }
+    
+    if (delta_curr[4] < t[i] && t[i] < delta_curr[5]) {
+      miu_star[i] <- 0
+    }
+    
+    if (delta_curr[5] < t[i] && t[i]< delta_curr[6]) {
+      miu_star[i] <- alpha_curr[4] * (1 - cos(pi * (t[i] - delta_curr[5]) / (delta_curr[6]-delta_curr[5]))) 
+    }
+    
+    
+    if (delta_curr[6] < t[i] && t[i] < delta_curr[7]) {
+      miu_star[i] <- alpha_curr[4] * (1 + cos(pi * (t[i] - delta_curr[6]) / (delta_curr[7]-delta_curr[6]))) 
+    }
+    
+    
+    if (delta_curr[7] < t[i] && t[i] < delta_curr[8]) {
+      miu_star[i] <- alpha_curr[5] * (cos(pi * (t[i] - delta_curr[7]) / (delta_curr[8] - delta_curr[7])) - 1) 
+    }
+    
+    
+    if (delta_curr[8] < t[i] && t[i] < delta_curr[9]) {
+      miu_star[i] <- alpha_curr[6] * (1 - cos(pi * (t[i] - delta_curr[8]) / (delta_curr[9] - delta_curr[8]))) - 2 * alpha_curr[5]
+    }
+    
+    
+    if (delta_curr[9] < t[i] && t[i] < delta_curr[10]) {
+      miu_star[i] <- alpha_curr[7] * (cos(pi * (t[i] - delta_curr[9]) / (delta_curr[10] - delta_curr[9])) - 1)  + 2 * alpha_curr[6] - 2 * alpha_curr[5]
+    }
+    
+    
+    if (delta_curr[10] < t[i] && t[i] < delta_curr[11]) {
+      miu_star[i] <- alpha_curr[8] * (1 - cos(pi * (t[i] - delta_curr[10]) / (delta_curr[11] - delta_curr[10]))) - 2 * alpha_curr[7] + 2 * alpha_curr[6] - 2 * alpha_curr[5]
+    }
+    
+    if (delta_curr[11] < t[i] && t[i] < delta_curr[12]) {
+      miu_star[i] <- alpha_curr[9] * (1 - cos(pi * (t[i] - delta_curr[11]) / (delta_curr[12] - delta_curr[11]))) + 2 * alpha_curr[8] - alpha_curr[7] + 2 * alpha_curr[6] - 2 * alpha_curr[5]
+    }
+    
+    
+    if (delta_curr[12] < t[i] && t[i] < delta_curr[13]) {
+      miu_star[i] <- (alpha_curr[9] + alpha_curr[8] - alpha_curr[7] + alpha_curr[6] - alpha_curr[5]) * (1 + cos(pi * (t[i] - delta_curr[12]) / (delta_curr[13] - delta_curr[12])))
+    }
+    
+    
+    if (delta_curr[13] < t[i] && t[i] < delta_curr[14]) {
+      miu_star[i] <- (alpha_curr[9] + alpha_curr[8] - alpha_curr[7] + alpha_curr[6] - alpha_curr[5]) * (1 + cos(pi * (t[i] - delta_curr[12]) / (delta_curr[13] - delta_curr[12])))
+    } 
+    
+    
+    if (delta_curr[14] < t[i] && t[i] < delta_curr[15]) {
+      miu_star[i] <- 0
+    } 
+    
+    
+    if (delta_curr[14] < t[i] && t[i] < delta_curr[15]) {
+      miu_star[i] <- alpha_curr[10] * (1 - cos(pi * (t[i] - delta_curr[14]) / (delta_curr[15] - delta_curr[14])))
+    } 
+    
+    
+    if (delta_curr[15] < t[i] && t[i] < delta_curr[16]) {
+      miu_star[i] <- alpha_curr[10] * (1 + cos(pi * (t[i] - delta_curr[15]) / (delta_curr[16] - delta_curr[15])))
+    } 
+    
+    
+    if (delta_curr[16] < t[i] && t[i] < delta_curr[17]) {
+      miu_star[i] <- alpha_curr[11] * (cos(pi * (t[i] - delta_curr[16]) / (delta_curr[17] - delta_curr[16])) - 1)
+    } 
+    
+    
+    if (delta_curr[17] < t[i] && t[i] < end_time) {
+      miu_star[i] <- alpha_curr[12] * (1 - cos(pi * (t[i] - delta_curr[17]) / (end_time - delta_curr[17]))) - 2 * alpha_curr[11]
+    } 
+  }
+  
+  return (miu_star)
+}
+
+#function for generating samples for beta
+
+beta_one_samp <- function(beta_curr, BETA, s) { 
+  #generate candidate value
+  beta_star <- rnorm(1, beta_curr, proposal_sd)
+
+  #
+  miu_star <- gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_star, delta_curr = delta_curr)
+
+  #
+  mean_star <- miu_star + dc_curr 
+
+  #
+  r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + prior_lpdf(beta_star) - prior_lpdf(beta_curr))
+  
+  #print(r)  
+  if(runif(1) < r){
+    beta_curr <- beta_star
+  }
+  BETA <- c(BETA, beta_curr)
+  return (list(beta_curr, BETA))
+}
+
+
+#function for generating samples for alphai
+
+alpha_one_samp <- function(i, alpha_i_curr, ALPHA_i, s) { 
+  #generate candidate value
+  alpha_i_star <- rnorm(1, alpha_i_curr, proposal_sd)
+  #print(c("ALPHA STAR: ", alpha_i_star))
+  
+  #
+  alpha_proposed <- alpha_curr
+  alpha_proposed[[k]] <- alpha_i_star #alpha_proposed is pointing to a different object than alpha_curr; no change to the list alpha_curr in the global is made
+  miu_star <- gen_miu_star(t, alpha_curr = alpha_proposed, beta_curr = beta_curr, delta_curr = delta_curr)
+  #print(c("MIU STAR: ", miu_star))
+  
+  #
+  mean_star <- miu_star + dc_curr 
+  #print(c("MEAN STAR: ", mean_star))
+  
+  #
+  r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + prior_lpdf(alpha_i_star) - prior_lpdf(alpha_i_curr))
+  
+  #print(c("R: ", r))
+  
+  if(runif(1) < r){
+    alpha_i_curr <- alpha_i_star
+  }
+  ALPHA_i <- c(ALPHA_i, alpha_i_curr)
+  return (list(alpha_i_curr, ALPHA_i))
+}
+
+#function for generating samples for deltai
+
+delta_one_samp <- function(delta_i_curr, delta_i_before, delta_i_next, DELTA_i, s) { 
+  #generate candidate value
+  delta_i_star <- rnorm(1, delta_i_curr, proposal_sd)
+  
+  #delta i proposed must be between delta i-1 and next delta i+1, if not just reject it
+  if (delta_i_star > delta_i_before && delta_i_star < delta_i_next) { 
+    #
+    delta_proposed <- delta_curr
+    delta_proposed[[k]] <- delta_i_star #delta_proposed is pointing to a different object than delta_curr; no change to the list delta_curr in the global is made
+    miu_star <- gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_proposed)
+    
+    #
+    mean_star <- miu_star + dc_curr 
+    
+    #
+    r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + dunif(delta_i_star, delta_i_before, delta_i_next, log = T) - dunif(delta_i_curr, delta_i_before, delta_i_next, log = T)) 
+    
+    if(runif(1) < r){
+      delta_i_curr <- delta_i_star
+    }
+  } 
+  
+  DELTA_i <- c(DELTA_i, delta_i_curr)
+  return (list(delta_i_curr, DELTA_i))
+}
+
+
+#function for generating samples for tao
+
+tao_one_samp <- function(tao_curr, TAO, s) { 
+  #generate candidate value
+  tao_star <- rgamma(1, 0.01, 0.01)
+  
+  #
+  miu_star <- gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  
+  #
+  mean_star <- miu_star + dc_curr 
+  
+  # note that tao in likelihood_lpdf is now tao_star
+  r <- exp(likelihood_lpdf(y, mean_star, tao_star) - likelihood_lpdf(y, mean_curr, tao_curr) + dgamma(tao_star, 0.01, 0.01, log = T) - dgamma(tao_curr, 0.01, 0.01, log = T))
+  print(r)
+ 
+  if(runif(1) < r){
+    tao_curr <- tao_star
+  }
+  TAO <- c(TAO, tao_curr)
+  return (list(tao_curr, TAO))
+}
+
+tao_one_samp_cond <- function(tao_curr, TAO, s) {
+  #generate candidate value
+  shape_star <- 0.5 * (length(y) + 0.02)
+  sum_diff <- sum( (y - mean_curr)^2 )
+  rate_star <- 0.5 * (0.02 + sum_diff)
+  tao_curr <- rgamma(1, shape_star, rate_star)
+  TAO <- c(TAO, tao_curr)
+  return (list(tao_curr, TAO))
+}
+
+
+#function for generating samples for DC
+
+dc_one_samp <- function(dc_curr, DC, s) { 
+  #generate candidate value
+  dc_star <- rnorm(1, dc_curr, proposal_sd)
+  
+  #
+  miu_star <- gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  
+  # note that dc_star is now used instead of dc_curr
+  mean_star <- miu_star + dc_star 
+  
+  #
+  r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + prior_lpdf(dc_star) - prior_lpdf(dc_curr))
+  
+  #print(r)  
+  if(runif(1) < r){
+    dc_curr <- dc_star
+  }
+  DC <- c(DC, dc_curr)
+  return (list(dc_curr, DC))
+}
+```
+
+```{r overall-storage}
+ARR_DC <- as.list(rep(0,5))
+ARR_ALPHA <- as.list(rep(0,5))
+ARR_BETA <- as.list(rep(0,5))
+ARR_DELTA <- as.list(rep(0,5))
+ARR_TAO <- as.list(rep(0,5))
+ARR_MEAN <- as.list(rep(0,5))
+ARR_TIME <- as.list(rep(0,5))
+ARR_Y <- as.list(rep(0,5))
+```
+
+# SAMPLE 1
+
+```{r initialization-arr-1}
+S <- 3000
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+data <- read_csv("heartbeat_data/samples_arrhythmia/heartbeat_1.csv", col_names = FALSE)
+y <- unlist(data[,2]) / 1000 #transform units back to mV because priors are not jeffrey's prior
+t <- unlist(data[,1]) - unlist(data[,1])[1] #make sure that time starts from 0
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-arr-1}
+for(s in 1:S) {
+  #print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+```
+
+```{r storage-1}
+ARR_DC[[1]] <- DC
+ARR_ALPHA[[1]]  <- ALPHA
+ARR_BETA[[1]]  <- BETA
+ARR_DELTA[[1]]  <- DELTA
+ARR_TAO[[1]]  <- TAO
+ARR_MEAN[[1]]  <- MEAN
+ARR_TIME[[1]] <- t
+ARR_Y[[1]] <- y
+```
+
+# SAMPLE 2
+
+```{r initialization-arr-2}
+S <- 3000
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+data <- read_csv("heartbeat_data/samples_arrhythmia/heartbeat_2.csv", col_names = FALSE)
+y <- unlist(data[,2]) / 1000 #transform units back to mV because priors are not jeffrey's prior
+t <- unlist(data[,1]) - unlist(data[,1])[1] #make sure that time starts from 0
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-arr-2}
+for(s in 1:S) {
+  print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+```
+
+```{r storage-2}
+ARR_DC[[2]] <- DC
+ARR_ALPHA[[2]]  <- ALPHA
+ARR_BETA[[2]]  <- BETA
+ARR_DELTA[[2]]  <- DELTA
+ARR_TAO[[2]]  <- TAO
+ARR_MEAN[[2]]  <- MEAN
+ARR_TIME[[2]] <- t
+ARR_Y[[2]] <- y
+```
+
+# SAMPLE 3
+
+```{r initialization-arr-3}
+S <- 3000
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+data <- read_csv("heartbeat_data/samples_arrhythmia/heartbeat_3.csv", col_names = FALSE)
+y <- unlist(data[,2]) / 1000 #transform units back to mV because priors are not jeffrey's prior
+t <- unlist(data[,1]) - unlist(data[,1])[1] #make sure that time starts from 0
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-arr-3}
+for(s in 1:S) {
+  print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+```
+
+```{r arr-3}
+ARR_DC[[3]] <- DC
+ARR_ALPHA[[3]]  <- ALPHA
+ARR_BETA[[3]]  <- BETA
+ARR_DELTA[[3]]  <- DELTA
+ARR_TAO[[3]]  <- TAO
+ARR_MEAN[[3]]  <- MEAN
+ARR_TIME[[3]] <- t
+ARR_Y[[3]] <- y
+```
+
+# SAMPLE 4
+
+```{r initialization-arr-4}
+S <- 3000
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+data <- read_csv("heartbeat_data/samples_arrhythmia/heartbeat_4.csv", col_names = FALSE)
+y <- unlist(data[,2]) / 1000 #transform units back to mV because priors are not jeffrey's prior
+t <- unlist(data[,1]) - unlist(data[,1])[1] #make sure that time starts from 0
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-arr-4}
+for(s in 1:S) {
+  print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+```
+
+```{r storage-4}
+ARR_DC[[4]] <- DC
+ARR_ALPHA[[4]]  <- ALPHA
+ARR_BETA[[4]]  <- BETA
+ARR_DELTA[[4]]  <- DELTA
+ARR_TAO[[4]]  <- TAO
+ARR_MEAN[[4]]  <- MEAN
+ARR_TIME[[4]] <- t
+ARR_Y[[4]] <- y
+```
+
+# SAMPLE 5
+
+```{r initialization-arr-5}
+S <- 3000
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+data <- read_csv("heartbeat_data/samples_arrhythmia/heartbeat_5.csv", col_names = FALSE)
+y <- unlist(data[,2]) / 1000 #transform units back to mV because priors are not jeffrey's prior
+t <- unlist(data[,1]) - unlist(data[,1])[1] #make sure that time starts from 0
+beta_curr <- 1
+alpha_curr <- rep(1, 12)
+delta_curr<- seq(0, max(t), length.out = 17) 
+end_time <- max(t)
+tao_curr <- 1
+mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+dc_curr <- 0.5
+miu_curr <- mean_curr - dc_curr
+
+#storage
+
+DC <- NULL
+ALPHA <- rep(list(NULL), 12)
+BETA <- NULL
+DELTA <- rep(list(NULL), 17)
+TAO <- NULL
+MEAN <- rep(list(NULL), length(y))
+```
+
+```{r metropolis-arr-5}
+for(s in 1:S) {
+  print(c("s: ", s))
+  
+  #1 draw of Beta
+  
+  beta_lst <- beta_one_samp(beta_curr, BETA, s)
+  beta_curr <- beta_lst[[1]]
+  BETA <- beta_lst[[2]]
+  #1 draw of Alphas (1-12)
+  
+  for (k in 1:12) {
+    alpha_lst <- alpha_one_samp(k, alpha_curr[k], ALPHA[[k]], s)
+    alpha_curr[k] <- alpha_lst[[1]]
+    ALPHA[[k]] <- alpha_lst[[2]]
+  }
+  
+  #1 draw of Deltas (1-17)
+  
+  delta_lst <- delta_one_samp(delta_curr[1], 0, delta_curr[2], DELTA[[1]], s)
+  delta_curr[1] <- delta_lst[[1]]
+  DELTA[[1]] <- delta_lst[[2]]
+  
+  for (k in 2:16) {
+    delta_lst <- delta_one_samp(delta_curr[k], delta_curr[k-1], delta_curr[k+1], DELTA[[k]], s)
+    delta_curr[k] <- delta_lst[[1]]
+    DELTA[[k]] <- delta_lst[[2]]
+  }
+  
+  delta_lst <- delta_one_samp(delta_curr[17], delta_curr[[16]], end_time,  DELTA[[17]], s)
+  delta_curr[17] <- delta_lst[[1]]
+  DELTA[[17]] <- delta_lst[[2]]
+  
+  #1 draw of Tao 
+  tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
+  tao_curr <- tao_lst[[1]]
+  TAO <- tao_lst[[2]]
+
+  #1 draw of DC 
+  dc_lst <- dc_one_samp(dc_curr, DC, s)
+  dc_curr <- dc_lst[[1]]
+  DC <- dc_lst[[2]]
+  
+  mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
+  for (k in 1:length(y)) {
+    MEAN[[k]] <- c(MEAN[[k]], mean_curr[[k]])
+  }
+  
+  #print(c("MEAN CURR: ", mean_curr))
+}
+```
+
+```{r arr-5}
+ARR_DC[[5]] <- DC
+ARR_ALPHA[[5]]  <- ALPHA
+ARR_BETA[[5]]  <- BETA
+ARR_DELTA[[5]]  <- DELTA
+ARR_TAO[[5]]  <- TAO
+ARR_MEAN[[5]]  <- MEAN
+ARR_TIME[[5]] <- t
+ARR_Y[[5]] <- y
+```
+
+#Save Object
+
+```{r}
+saveRDS(ARR_ALPHA, "MCMC_Samples/ARR_ALPHA.rds")
+saveRDS(ARR_BETA, "MCMC_Samples/ARR_BETA.rds")
+saveRDS(ARR_DELTA, "MCMC_Samples/ARR_DELTA.rds")
+saveRDS(ARR_DC, "MCMC_Samples/ARR_DC.rds")
+saveRDS(ARR_MEAN, "MCMC_Samples/ARR_MEAN.rds")
+saveRDS(ARR_TAO, "MCMC_Samples/ARR_TAO.rds")
+saveRDS(ARR_Y, "MCMC_Samples/ARR_Y.rds")
+saveRDS(ARR_TIME, "MCMC_Samples/ARR_TIME.rds")
+```
+
+#Data Visualization
+
+```{r load-mcmc-samples}
+ARR_ALPHA <- readRDS("MCMC_Samples/ARR_ALPHA.rds")
+ARR_BETA <- readRDS("MCMC_Samples/ARR_BETA.rds")
+ARR_DELTA <- readRDS("MCMC_Samples/ARR_DELTA.rds")
+ARR_DC <- readRDS("MCMC_Samples/ARR_DC.rds")
+ARR_MEAN <- readRDS("MCMC_Samples/ARR_MEAN.rds")
+ARR_TAO <- readRDS("MCMC_Samples/ARR_TAO.rds")
+ARR_Y <- readRDS("MCMC_Samples/ARR_Y.rds")
+ARR_TIME <- readRDS("MCMC_Samples/ARR_TIME.rds")
+```
+
+```{r set-seed}
+set.seed(12321)
+```
+
+```{r estimate-parameters}
+print(paste("MCMC Estimate of Beta = ", mean(unlist(ARR_BETA))))
+print(paste("MCMC Estimate of TAO = ", mean(unlist(ARR_TAO))))
+print(paste("MCMC Estimate of DC = ", mean(unlist(ARR_DC))))
+extract_i_alpha <- function(i){
+  ret <- map(1:5, function(x) ARR_ALPHA[[x]][i])
+  return (ret)
+}
+for (i in 1:12) {
+  print(paste(str_glue("MCMC Estimate of Alpha {i} = "), 
+              mean(unlist(extract_i_alpha(i)))))
+}
+
+extract_i_delta <- function(i){
+  ret <- map(1:5, function(x) ARR_DELTA[[x]][i])
+  return (ret)
+}
+for (i in 1:17) {
+  print(paste(str_glue("MCMC Estimate of Delta {i} = "), 
+              mean(unlist(extract_i_delta(i)))))
+}
+```
+
+```{r estimate-parameters-without-samp-1}
+#sample 1 could not be captured properly so including its values may cause model parameters to be inaccurate
+
+print(paste("MCMC Estimate of Beta = ", mean(unlist(ARR_BETA[2:5]))))
+print(paste("MCMC Estimate of TAO = ", mean(unlist(ARR_TAO[2:5]))))
+print(paste("MCMC Estimate of DC = ", mean(unlist(ARR_DC[2:5]))))
+extract_i_alpha <- function(i){
+  ret <- map(2:5, function(x) ARR_ALPHA[[x]][i])
+  return (ret)
+}
+for (i in 1:12) {
+  print(paste(str_glue("MCMC Estimate of Alpha {i} = "), 
+              mean(unlist(extract_i_alpha(i)))))
+}
+
+extract_i_delta <- function(i){
+  ret <- map(2:5, function(x) ARR_DELTA[[x]][i])
+  return (ret)
+}
+for (i in 1:17) {
+  print(paste(str_glue("MCMC Estimate of Delta {i} = "), 
+              mean(unlist(extract_i_delta(i)))))
+}
+```
+
+```{r arr-mcmc-df}
+ARR_DF <- as.list(rep(0,5))
+
+process_df <- function(index) {
+  posterior_mean <- unlist(map(ARR_MEAN[[index]], mean))
+  df <- tibble(
+    time = ARR_TIME[[index]],
+    pred_rate = posterior_mean,
+    emp_rate = ARR_Y[[index]]
+    )
+  ARR_DF[[index]] <<- df
+} 
+
+for (s in 1:5) {
+  process_df(s)
+}
+```
+
+```{r arr-ecg-simulated}
+for (i in 1:5){
+  x <- ggplot() +
+    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,2]), col = "blue")) +
+    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,3]), col = "orange")) +
+    labs(title = str_glue("Model Fit over Data: Sample {i}"), x = "time (s)", y = "signal (mV)") +
+    scale_color_discrete(name = "", labels = c("Model", "ECG Signal"))
+  
+  print(x)
+}
+  
+```
+
+
+```{r arr-parameter-diagnostics-A, fig.width = 8, fig.height = 8}
+par(mfrow = c(3, 2))
+for(j in sample(12, 3)){
+  plot(unlist(ARR_ALPHA[[2]][j]), type = 'l', ylab = paste("Alpha", j), xlab = "Iter", col = "purple", main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_ALPHA[[2]][j]))) / S, 3)))
+  acf(unlist(ARR_ALPHA[[2]][3]), ylab = paste("Alpha", j), main = "")
+}
+
+par(mfrow = c(3, 2))
+for(j in sample(17, 3)){
+  plot(unlist(ARR_DELTA[[2]][j]), type = 'l', ylab = paste("Delta", j), xlab = "Iter", col = "purple", main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_DELTA[[2]][j]))) / S, 3)))
+  acf(unlist(ARR_DELTA[[2]][j]), ylab = paste("Delta", j), main = "")
+}
+```
+
+```{r arr-parameter-diagnostics-B, fig.width = 8, fig.height = 3}
+par(mfrow = c(1,2))
+plot(unlist(ARR_DC[[2]]), type = 'l', ylab = "DC", xlab = "Iter", col = "purple",
+       main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_DC[[2]]))) / S, 3)))
+acf(unlist(ARR_DC[[2]]), ylab = "DC", main = "")
+
+par(mfrow = c(1,2))
+plot(unlist(ARR_TAO[[2]]), type = 'l', ylab = "Tao", xlab = "Iter", col = "purple",
+    main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_TAO[[2]]))) / S, 3)))
+acf(unlist(ARR_TAO[[2]]), ylab = "Tao", main = "")
+```
+
+
+```{r arr-alpha-posterior}
+alpha_names <- map_chr(1:12, function(x) str_c("alpha_", x, sep = ""))
+alpha_df <- map_dfc(ARR_ALPHA[[2]], function(x) x)
+colnames(alpha_df) <- alpha_names
+
+alpha_df <- alpha_df %>%
+  pivot_longer(1:12, names_to = "index", values_to = "alpha_1") %>%
+  mutate(index = factor(index, levels = alpha_names))
+
+colnames(alpha_df)[2] <- "value"
+
+alpha_df %>%
+  filter(index %in% alpha_names[1:6]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+
+alpha_df %>%
+  filter(index %in% alpha_names[7:12]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+```
+
+```{r arr-delta-posterior}
+delta_names <- map_chr(1:17, function(x) str_c("delta_", x, sep = ""))
+delta_df <- map_dfc(ARR_DELTA[[2]], function(x) x)
+colnames(delta_df) <- delta_names
+
+delta_df <- delta_df %>%
+  pivot_longer(1:17, names_to = "index", values_to = "delta_1") %>%
+  mutate(index = factor(index, levels = delta_names))
+
+colnames(delta_df)[2] <- "value"
+
+delta_df %>%
+  filter(index %in% delta_names[1:6]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+
+delta_df %>%
+  filter(index %in% delta_names[7:12]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+
+delta_df %>%
+  filter(index %in% delta_names[13:17]) %>%
+  ggplot() +
+  geom_density(aes(x = value, fill = index), alpha = 0.7) 
+```
+
+```{r arr-normal-param-posterior}
+for(j in sample(length(ARR_MEAN[[2]]), 2)){
+  for (k in sample(length(ARR_MEAN[[2]]), 2)) {
+   plot_2d <- ggplot() +
+    geom_point(aes(x = unlist(ARR_MEAN[[2]][j]), y = unlist(ARR_MEAN[[2]][k]))) +
+    geom_density_2d(aes(x = unlist(ARR_MEAN[[2]][j]), y = unlist(ARR_MEAN[[2]][k]))) +
+     labs(x = str_glue("Mean_{j}"), y = str_glue("Mean_{k}"))
+   print(plot_2d)
+  }
+}
+```
