@@ -780,6 +780,7 @@ extract_i_alpha <- function(i){
   ret <- map(1:5, function(x) HEALTHY_ALPHA[[x]][i])
   return (ret)
 }
+
 for (i in 1:12) {
   print(paste(str_glue("MCMC Estimate of Alpha {i} = "), 
               mean(unlist(extract_i_alpha(i)))))
@@ -824,17 +825,41 @@ for (s in 1:5) {
 }
 ```
 
-```{r healthy-ecg-simulated}
+
+
+
+```{r healthy-ecg-simulated, fig.width = 15, fig.height = 8}
 for (i in 1:5){
+  
+  delta <- as.vector(map_dbl(1:17, function(x) mean(unlist(HEALTHY_DELTA[[i]][x]))))
   x <- ggplot() +
-    geom_line(aes(x = HEALTHY_TIME[[i]], y = unlist(HEALTHY_DF[[i]][,2]), col = "blue")) +
-    geom_line(aes(x = HEALTHY_TIME[[i]], y = unlist(HEALTHY_DF[[i]][,3]), col = "orange")) +
+    geom_line(aes(x = HEALTHY_TIME[[i]], y = unlist(HEALTHY_DF[[i]][,2]), col = "blue"), size = 2) +
+    geom_line(aes(x = HEALTHY_TIME[[i]], y = unlist(HEALTHY_DF[[i]][,3]), col = "orange"), size = 2) +
+    geom_vline(xintercept = delta, linetype = 1, color = "black", size = 0.5) +
+    geom_text(aes(x = delta + 0.01, y= Inf, label = map_chr(1:17, as.character)), colour = "red", vjust = 1, size = 5) +
     labs(title = str_glue("Model Fit over Data: Sample {i}"), x = "time (s)", y = "signal (mV)") +
     scale_color_discrete(name = "", labels = c("Model", "ECG Signal"))
   
   print(x)
 }
   
+```
+
+```{r simulated-w-lines, fig.width = 15, fig.height = 8}
+for (i in 1:5){
+  
+  delta <- as.vector(map_dbl(1:17, function(x) mean(unlist(HEALTHY_DELTA[[i]][x]))))
+  x <- ggplot() +
+    geom_line(aes(x = HEALTHY_TIME[[i]], y = unlist(HEALTHY_DF[[i]][,2]), col = "blue"), size = 1.75) +
+    geom_line(aes(x = HEALTHY_TIME[[i]], y = unlist(HEALTHY_DF[[i]][,3]), col = "orange"), size = 1.75) +
+    geom_segment(aes(x = delta,xend = delta, y = -Inf  ,yend = max(unlist(HEALTHY_DF[[i]][,2])*0.99, unlist(HEALTHY_DF[[i]][,3])*0.99)), linetype= 1, colour = "black", size = 0.5)  +
+    geom_text(aes(x = delta, y= Inf, label = map_chr(1:17, as.character)), colour = "red", vjust = 1, size = 5) +
+    labs(title = str_glue("Model Fit over Data: Sample {i}"), x = "time (s)", y = "signal (mV)") +
+    scale_color_discrete(name = "", labels = c("Model", "ECG Signal"))
+  
+  print(x)
+}
+
 ```
 
 
@@ -925,4 +950,111 @@ for(j in sample(length(HEALTHY_MEAN[[1]]), 2)){
    print(plot_2d)
   }
 }
+```
+
+
+
+```{r plot-pred-point}
+# this function calculates the new miu based on the updated theta, theta_star
+gen_miu <- function(t, alpha_curr, beta_curr, delta_curr, end_time) {
+  
+    if (0 <= t && t < delta_curr[1]) {
+      miu_star <- alpha_curr[1] * cos(pi * t / delta_curr[1]) + beta_curr
+    }
+    
+    
+    if (delta_curr[1] <= t && t < delta_curr[2]) {
+      miu_star <- alpha_curr[2] * (1 - cos(pi * (t - delta_curr[1]) / (delta_curr[2]-delta_curr[1]))) + beta_curr - alpha_curr[1]
+    }
+    
+    
+    if (delta_curr[2] <= t && t < delta_curr[3]) {
+      miu_star <- alpha_curr[3] * (1 - cos(pi * (t - delta_curr[2]) / (delta_curr[3]-delta_curr[2]))) + beta_curr - alpha_curr[1] + 2 * alpha_curr[2]
+    }
+    
+    
+    if (delta_curr[3] <= t && t < delta_curr[4]) {
+      miu_star <- 0.5 * (beta_curr - alpha_curr[1] + 2 * alpha_curr[2] + 2 * alpha_curr[3]) * (1 + cos(pi * (t - delta_curr[3]) / (delta_curr[4]-delta_curr[3])))
+    }
+    
+    if (delta_curr[4] <= t && t < delta_curr[5]) {
+      miu_star <- 0
+    }
+    
+    if (delta_curr[5] <= t && t< delta_curr[6]) {
+      miu_star <- alpha_curr[4] * (1 - cos(pi * (t - delta_curr[5]) / (delta_curr[6]-delta_curr[5]))) 
+    }
+    
+    
+    if (delta_curr[6] <= t && t < delta_curr[7]) {
+      miu_star <- alpha_curr[4] * (1 + cos(pi * (t - delta_curr[6]) / (delta_curr[7]-delta_curr[6]))) 
+    }
+    
+    
+    if (delta_curr[7] <= t && t < delta_curr[8]) {
+      miu_star <- alpha_curr[5] * (cos(pi * (t - delta_curr[7]) / (delta_curr[8] - delta_curr[7])) - 1) 
+    }
+    
+    
+    if (delta_curr[8] <= t && t < delta_curr[9]) {
+      miu_star <- alpha_curr[6] * (1 - cos(pi * (t - delta_curr[8]) / (delta_curr[9] - delta_curr[8]))) - 2 * alpha_curr[5]
+    }
+    
+    
+    if (delta_curr[9] <= t && t < delta_curr[10]) {
+      miu_star <- alpha_curr[7] * (cos(pi * (t - delta_curr[9]) / (delta_curr[10] - delta_curr[9])) - 1)  + 2 * alpha_curr[6] - 2 * alpha_curr[5]
+    }
+    
+    
+    if (delta_curr[10] <= t && t < delta_curr[11]) {
+      miu_star <- alpha_curr[8] * (1 - cos(pi * (t - delta_curr[10]) / (delta_curr[11] - delta_curr[10]))) - 2 * alpha_curr[7] + 2 * alpha_curr[6] - 2 * alpha_curr[5]
+    }
+    
+    if (delta_curr[11] <= t && t < delta_curr[12]) {
+      miu_star <- alpha_curr[9] * (1 - cos(pi * (t - delta_curr[11]) / (delta_curr[12] - delta_curr[11]))) + 2 * alpha_curr[8] - alpha_curr[7] + 2 * alpha_curr[6] - 2 * alpha_curr[5]
+    }
+    
+    
+    if (delta_curr[12] <= t && t < delta_curr[13]) {
+      miu_star <- (alpha_curr[9] + alpha_curr[8] - alpha_curr[7] + alpha_curr[6] - alpha_curr[5]) * (1 + cos(pi * (t - delta_curr[12]) / (delta_curr[13] - delta_curr[12])))
+    }
+    
+    
+    if (delta_curr[13] <= t && t < delta_curr[14]) {
+      miu_star <- (alpha_curr[9] + alpha_curr[8] - alpha_curr[7] + alpha_curr[6] - alpha_curr[5]) * (1 + cos(pi * (t - delta_curr[12]) / (delta_curr[13] - delta_curr[12])))
+    } 
+    
+    
+    if (delta_curr[14] <= t && t < delta_curr[15]) {
+      miu_star <- 0
+    } 
+    
+    
+    if (delta_curr[14] <= t && t < delta_curr[15]) {
+      miu_star <- alpha_curr[10] * (1 - cos(pi * (t - delta_curr[14]) / (delta_curr[15] - delta_curr[14])))
+    } 
+    
+    
+    if (delta_curr[15] <= t && t < delta_curr[16]) {
+      miu_star <- alpha_curr[10] * (1 + cos(pi * (t - delta_curr[15]) / (delta_curr[16] - delta_curr[15])))
+    } 
+    
+    
+    if (delta_curr[16] <= t && t < delta_curr[17]) {
+      miu_star <- alpha_curr[11] * (cos(pi * (t - delta_curr[16]) / (delta_curr[17] - delta_curr[16])) - 1)
+    } 
+    
+    
+    if (delta_curr[17] <= t && t < end_time) {
+      miu_star <- alpha_curr[12] * (1 - cos(pi * (t - delta_curr[17]) / (end_time - delta_curr[17]))) - 2 * alpha_curr[11]
+    } 
+  return (miu_star)
+}
+
+ #alpha <- unlist(map(1:12, function(x) mean(unlist(HEALTHY_ALPHA[[1]][x]))))
+  #beta <- mean(unlist(HEALTHY_BETA[[1]]))
+  #dc <- mean(unlist(HEALTHY_DC[[1]]))
+  #tao <- mean(unlist(HEALTHY_TAO[[1]]))
+  #end_time <- tail(HEALTHY_TIME[[1]], n = 1)
+  #pred_y <- map_dbl(delta, function(x) gen_miu(t = x, alpha, beta, delta, end_time))
 ```
