@@ -1,0 +1,210 @@
+---
+title: "Parameter Interpretation"
+author: "Nathan O'Hara"
+date: "4/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+```
+
+The goal of this markdown is to perform a posterior analysis of model results.Our 
+
+```{r}
+ARR_ALPHA <- readRDS("./MCMC_Samples/ARR_ALPHA.rds")
+HEALTHY_ALPHA <- readRDS("./MCMC_Samples/HEALTHY_ALPHA.rds")
+```
+
+```{r}
+one_and_two <- data.frame(beat1 = ARR_ALPHA[[1]][[1]], beat2 = ARR_ALPHA[[1]][[2]])
+
+#
+one_and_two %>%
+  #magrittr::set_colnames(c("alpha_1", "alpha_2")) %>%
+  dplyr::mutate(iter = 1:n()) %>%
+  ggplot2::ggplot() +
+  geom_path(aes(x = beat1, y = beat2, colour = iter), alpha = 0.2, size = 0.5) +
+  geom_point(aes(x = theta_1, y = theta_2, colour = iter), size = 0.5) +
+  scale_color_distiller(palette = "Spectral", name = "Iter") +
+  #labs(x = expression(theta[1]), y = expression(theta[2]))
+
+```
+
+```{r}
+one_and_two %>%
+  mutate(iter = 1:n()) %>%
+  ggplot() + 
+  geom_point(aes(x = beat1, y = beat2, colour = factor(iter)), alpha = 0.2, size = 0.5) + 
+  scale_color_brewer(palette = "RdYlGn", type = "seq")
+```
+
+```{r}
+combine_beats <- function(lst, i){
+  build = NULL
+  for (beat in 1:length(lst)){
+    # For each beat, add element i to the list
+    build = c(build, lst[[beat]][[i]])
+  }
+  return(build)
+}
+
+ARR_ALPHA_COMB = as.list(rep(0,12))
+HEALTHY_ALPHA_COMB = as.list(rep(0,12))
+
+
+for (i in 1:12){
+  ARR_ALPHA_COMB[[i]] = combine_beats(ARR_ALPHA, i)
+  HEALTHY_ALPHA_COMB[[i]] = combine_beats(HEALTHY_ALPHA, i)
+}
+
+```
+
+
+```{r}
+sum(sample(unlist(ARR_ALPHA[[1]][[1]])) > sample(unlist(ARR_ALPHA[[2]][[1]]))) / 3000
+```
+
+
+```{r}
+for (i in 1:12){
+  print(paste("P-Value of two sample t-test on parameter alpha_", i))
+  print(t.test(unlist(ARR_ALPHA_COMB[[i]]), unlist(HEALTHY_ALPHA_COMB[[i]]), alternative = "two.sided", var.equal = FALSE)$p.value)
+}
+```
+
+```{r}
+for (i in 1:4){
+  for (j in 1:12){
+    print(paste("P-Value of two sample t-test on parameter alpha_", j ,"for heartbeats ", i, "and", i+1))
+    print(t.test(unlist(ARR_ALPHA[[i]][[j]]), unlist(ARR_ALPHA[[i+1]][[j]]), alternative = "two.sided", var.equal = FALSE)$p.value)
+  }
+}
+```
+
+```{r}
+HEALTHY_BETA <- readRDS("./MCMC_Samples/HEALTHY_BETA.rds")
+ARR_BETA <- readRDS("./MCMC_Samples/ARR_BETA.rds")
+```
+
+```{r}
+HEALTHY_BETA_COMB = NULL
+ARR_BETA_COMB = NULL
+
+for (i in 1:5){
+  HEALTHY_BETA_COMB = c(HEALTHY_BETA_COMB, HEALTHY_BETA[[i]])
+  ARR_BETA_COMB = c(ARR_BETA_COMB, ARR_BETA[[i]])
+}
+```
+
+```{r}
+hist(ARR_BETA_COMB)
+hist(HEALTHY_BETA_COMB)
+```
+
+```{r}
+# P value difference between healthy beta and unhealthy beta
+t.test(HEALTHY_BETA_COMB, ARR_BETA_COMB, alternative = "two.sided", var.equal = F)
+# Obviously significantly different
+```
+
+```{r}
+# But are the heartbeats significantly different?
+print("HEALTHY:")
+for (i in 1:4){
+  print(paste("HEALTHY: p value for dif between beta in beat", i, "and beat", i+1))
+  print(t.test(HEALTHY_BETA[[i]], HEALTHY_BETA[[i+1]], alternative = "two.sided", var.equal = F)$p.value)
+}
+
+```
+
+```{r}
+# But are the heartbeats significantly different?
+print("ARR:")
+for (i in 1:4){
+  print(paste("ARR: p value for dif between beta in beat", i, "and beat", i+1))
+  print(t.test(ARR_BETA[[i]], ARR_BETA[[i+1]], alternative = "two.sided", var.equal = F)$p.value)
+}
+
+```
+
+
+
+```{r}
+ARR_DELTA = readRDS("./MCMC_Samples/ARR_DELTA.rds")
+HEALTHY_DELTA = readRDS("./MCMC_Samples/HEALTHY_DELTA.rds")
+```
+
+
+
+```{r}
+
+ARR_DELTA_COMB = as.list(rep(0,17))
+HEALTHY_DELTA_COMB = as.list(rep(0,17))
+
+
+for (i in 1:17){
+  ARR_DELTA_COMB[[i]] = combine_beats(ARR_DELTA, i)
+  HEALTHY_DELTA_COMB[[i]] = combine_beats(HEALTHY_DELTA, i)
+}
+
+```
+
+
+```{r}
+for (i in 1:17){
+  print(paste("P-Value of two sample t-test on parameter delta_", i))
+  print(t.test(unlist(ARR_DELTA_COMB[[i]]), unlist(HEALTHY_DELTA_COMB[[i]]), alternative = "two.sided", var.equal = FALSE)$p.value)
+}
+```
+
+```{r}
+ARR_MEAN = readRDS("./MCMC_Samples/ARR_MEAN.rds")
+HEALTHY_MEAN = readRDS("./MCMC_Samples/HEALTHY_MEAN.rds")
+```
+
+
+
+```{r}
+
+ARR_MEAN_COMB = as.list(rep(0,17))
+HEALTHY_MEAN_COMB = as.list(rep(0,17))
+
+
+for (i in 1:17){
+  ARR_DELTA_COMB[[i]] = combine_beats(ARR_DELTA, i)
+  HEALTHY_DELTA_COMB[[i]] = combine_beats(HEALTHY_DELTA, i)
+}
+
+```
+
+
+
+
+
+
+```{r}
+ggplot() + geom_density(aes(x = ARR_ALPHA_COMB[[1]]), fill = "pink", alpha = 0.5) + geom_density(aes(x = HEALTHY_ALPHA_COMB[[1]]), fill = "lightgreen", alpha = 0.5)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
