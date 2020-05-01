@@ -856,6 +856,22 @@ for (i in 1:5){
   
 ```
 
+```{r simulated-w-lines, fig.width = 15, fig.height = 8}
+for (i in 1:5){
+  
+  delta <- as.vector(map_dbl(1:17, function(x) mean(unlist(ARR_DELTA[[i]][x]))))
+  x <- ggplot() +
+    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,2]), col = "blue"), size = 1.75) +
+    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,3]), col = "orange"), size = 1.75) +
+    geom_segment(aes(x = delta,xend = delta, y = -Inf  ,yend = max(unlist(ARR_DF[[i]][,2])*0.99, unlist(ARR_DF[[i]][,3])*0.99)), linetype= 1, colour = "black", size = 0.5)  +
+    geom_text(aes(x = delta, y= Inf, label = map_chr(1:17, as.character)), colour = "red", vjust = 1, size = 5) +
+    labs(title = str_glue("Model Fit over Data: Sample {i}"), x = "time (s)", y = "signal (mV)") +
+    scale_color_discrete(name = "", labels = c("Model", "ECG Signal"))
+  
+  print(x)
+}
+```
+
 
 ```{r arr-parameter-diagnostics-A, fig.width = 8, fig.height = 8}
 par(mfrow = c(3, 2))
