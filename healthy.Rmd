@@ -855,7 +855,12 @@ for (i in 1:5){
     geom_segment(aes(x = delta,xend = delta, y = -Inf  ,yend = max(unlist(HEALTHY_DF[[i]][,2])*0.99, unlist(HEALTHY_DF[[i]][,3])*0.99)), linetype= 1, colour = "black", size = 0.5)  +
     geom_text(aes(x = delta, y= Inf, label = map_chr(1:17, as.character)), colour = "red", vjust = 1, size = 5) +
     labs(title = str_glue("Model Fit over Data: Sample {i}"), x = "time (s)", y = "signal (mV)") +
-    scale_color_discrete(name = "", labels = c("Model", "ECG Signal"))
+    scale_color_discrete(name = "", labels = c("Model", "ECG Signal")) +
+    theme(
+      plot.title = element_text(size=24),
+      axis.title.x = element_text(size=18),
+      axis.title.y = element_text(size=18),
+      legend.text = element_text(size=16))
   
   print(x)
 }
