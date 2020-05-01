@@ -1,10 +1,4 @@
-proposal_sd <- 0.5 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
-
-# this proposal pdf function is in Jordan's lab code but I think we dont need to calculate this in this case cause we assume symmetric proposal 
-proposal_lpdf <- function(theta_curr){
-  lpdf <- dnorm(theta_curr, proposal_sd)
-  return(lpdf)
-}
+proposal_sd <- 0.5 #assume same for alpha_curr, beta, delta_curr, DC (the paper did not specify proposal standard deviation ie stepsize)
 
 # prior pdf for all model parameters (used gamma(0.01,0.01) for uninformative prior)
 prior_lpdf <- function(theta){
@@ -38,7 +32,7 @@ gen_miu_star <- function(t, alpha_curr, beta_curr, delta_curr) {
     
     
     if (delta_curr[1] < t[i] && t[i] < delta_curr[2]) {
-      miu_star[i] <- alpha_curr[2] * (1 - cos(pi * t[i] * (t[i] - delta_curr[1]) / (delta_curr[2]-delta_curr[1]))) + beta_curr - alpha_curr[1]
+      miu_star[i] <- alpha_curr[2] * (1 - cos(pi * (t[i] - delta_curr[1]) / (delta_curr[2]-delta_curr[1]))) + beta_curr - alpha_curr[1]
     }
     
     
@@ -132,13 +126,13 @@ gen_miu_star <- function(t, alpha_curr, beta_curr, delta_curr) {
 beta_one_samp <- function(beta_curr, BETA, s) { 
   #generate candidate value
   beta_star <- rnorm(1, beta_curr, proposal_sd)
-
+  
   #
   miu_star <- gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_star, delta_curr = delta_curr)
-
+  
   #
   mean_star <- miu_star + dc_curr 
-
+  
   #
   r <- exp(likelihood_lpdf(y, mean_star, tao_curr) - likelihood_lpdf(y, mean_curr, tao_curr) + prior_lpdf(beta_star) - prior_lpdf(beta_curr))
   
@@ -224,7 +218,7 @@ tao_one_samp <- function(tao_curr, TAO, s) {
   # note that tao in likelihood_lpdf is now tao_star
   r <- exp(likelihood_lpdf(y, mean_star, tao_star) - likelihood_lpdf(y, mean_curr, tao_curr) + dgamma(tao_star, 0.01, 0.01, log = T) - dgamma(tao_curr, 0.01, 0.01, log = T))
   print(r)
- 
+  
   if(runif(1) < r){
     tao_curr <- tao_star
   }
@@ -266,27 +260,18 @@ dc_one_samp <- function(dc_curr, DC, s) {
   return (list(dc_curr, DC))
 }
 
-
-#Initiate 
-
-samples <- read_csv("samples.csv", skip = 1)
-colnames(samples) <- c("time", "signal")
-samples_longterm <- read_csv("samples_longterm.csv", skip = 1)
-colnames(samples_healthy) <- c("time", "signal")
-samples_sinus <- read_csv("samples_normal_sinus_rythmn.csv", skip = 1)
-colnames(samples_sinus) <- c("time", "signal")
-S <- 5000
-burn <- 5000
-#y <- samples$signal[76:662] #signal	0.208 max(samples$signal[0:250]) which(samples$signal[0:250] == 0.58)
-#t <- samples$time[76:662] #signal 0.705 max(samples$signal[0:700]) which(samples$signal[0:700] == 0.705)
-y <- samples_sinus$signal[55:210]
-t <- samples_sinus$time[55:210]
+#initialization
+S <- 3000
+proposal_sd <- 0.05 #assume same for alpha_curr, beta, delta_curr, DC for now (the paper did not specify proposal standard deviation ie stepsize)
+data <- read_csv("heartbeat_data/samples_normal_sinus_rhythm/heartbeat_1.csv", col_names = FALSE)
+y <- unlist(data[,2]) / 1000 #transform units back to mV because priors are not jeffrey's prior
+t <- unlist(data[,1]) - unlist(data[,1])[1] #make sure that time starts from 0
 beta_curr <- 1
 alpha_curr <- rep(1, 12)
 delta_curr<- seq(0, max(t), length.out = 17) 
 end_time <- max(t)
 tao_curr <- 1
-mean_curr <- rep(mean(y), length(y)) #mean_curr is a vector cause mean_star of y is a vector so I think r only lets me run it if it is a vector
+mean_curr <- rep(mean(y), length(y)) 
 dc_curr <- 0.5
 miu_curr <- mean_curr - dc_curr
 
@@ -299,6 +284,8 @@ DELTA <- rep(list(NULL), 17)
 TAO <- NULL
 MEAN <- rep(list(NULL), length(y))
 
+#sampling model parameters from 1 heartbeat
+
 for(s in 1:S) {
   print(c("s: ", s))
   
@@ -307,8 +294,6 @@ for(s in 1:S) {
   beta_lst <- beta_one_samp(beta_curr, BETA, s)
   beta_curr <- beta_lst[[1]]
   BETA <- beta_lst[[2]]
-  print(c("beta: ", beta_curr))
-  
   #1 draw of Alphas (1-12)
   
   for (k in 1:12) {
@@ -316,8 +301,6 @@ for(s in 1:S) {
     alpha_curr[k] <- alpha_lst[[1]]
     ALPHA[[k]] <- alpha_lst[[2]]
   }
-  
-  print(c("ALPHA: ", alpha_curr))
   
   #1 draw of Deltas (1-17)
   
@@ -335,23 +318,15 @@ for(s in 1:S) {
   delta_curr[17] <- delta_lst[[1]]
   DELTA[[17]] <- delta_lst[[2]]
   
-  print(c("DELTA: ", delta_curr))
-  
-  
   #1 draw of Tao 
   tao_lst <- tao_one_samp_cond(tao_curr, TAO, s)
   tao_curr <- tao_lst[[1]]
   TAO <- tao_lst[[2]]
-
-  print(c("TAO: ", tao_curr))
-  
   
   #1 draw of DC 
   dc_lst <- dc_one_samp(dc_curr, DC, s)
   dc_curr <- dc_lst[[1]]
   DC <- dc_lst[[2]]
-  
-  print(c("DC: ", dc_curr))
   
   mean_curr <- dc_curr + gen_miu_star(t, alpha_curr = alpha_curr, beta_curr = beta_curr, delta_curr = delta_curr)
   for (k in 1:length(y)) {
