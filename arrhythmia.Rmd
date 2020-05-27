@@ -843,13 +843,20 @@ for (s in 1:5) {
 }
 ```
 
-```{r arr-ecg-simulated}
+```{r arr-ecg-simulated, fig.width = 15, fig.height = 8}
 for (i in 1:5){
   x <- ggplot() +
-    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,2]), col = "blue")) +
-    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,3]), col = "orange")) +
+    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,2]), col = "blue"), size = 2) +
+    geom_line(aes(x = ARR_TIME[[i]], y = unlist(ARR_DF[[i]][,3]), col = "orange"), size = 2) +
     labs(title = str_glue("Model Fit over Data: Sample {i}"), x = "time (s)", y = "signal (mV)") +
-    scale_color_discrete(name = "", labels = c("Model", "ECG Signal"))
+    scale_color_discrete(name = "", labels = c("Model", "ECG Signal")) +
+    theme(
+      plot.title = element_text(size=28),
+      axis.title.x = element_text(size=22),
+      axis.text.x = element_text(size=22),
+      axis.title.y = element_text(size=22),
+      axis.text.y = element_text(size=22),
+      legend.text = element_text(size=16))
   
   print(x)
 }
@@ -874,15 +881,16 @@ for (i in 1:5){
 
 
 ```{r arr-parameter-diagnostics-A, fig.width = 8, fig.height = 8}
+set.seed(12345)
 par(mfrow = c(3, 2))
 for(j in sample(12, 3)){
-  plot(unlist(ARR_ALPHA[[2]][j]), type = 'l', ylab = paste("Alpha", j), xlab = "Iter", col = "purple", main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_ALPHA[[2]][j]))) / S, 3)))
+  plot(unlist(ARR_ALPHA[[2]][j]), type = 'l', ylab = paste("Alpha", j), xlab = "Iter", col = "purple", main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_ALPHA[[2]][j]))) / S, 2), "   ", "ESS = ", round(effectiveSize(unlist(ARR_ALPHA[[1]][j])),2)))
   acf(unlist(ARR_ALPHA[[2]][3]), ylab = paste("Alpha", j), main = "")
 }
 
 par(mfrow = c(3, 2))
 for(j in sample(17, 3)){
-  plot(unlist(ARR_DELTA[[2]][j]), type = 'l', ylab = paste("Delta", j), xlab = "Iter", col = "purple", main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_DELTA[[2]][j]))) / S, 3)))
+  plot(unlist(ARR_DELTA[[2]][j]), type = 'l', ylab = paste("Delta", j), xlab = "Iter", col = "purple", main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_DELTA[[2]][j]))) / S, 2), "   ", "ESS = ", round(effectiveSize(unlist(HEALTHY_DELTA[[2]][j])),2)))
   acf(unlist(ARR_DELTA[[2]][j]), ylab = paste("Delta", j), main = "")
 }
 ```
@@ -890,12 +898,12 @@ for(j in sample(17, 3)){
 ```{r arr-parameter-diagnostics-B, fig.width = 8, fig.height = 3}
 par(mfrow = c(1,2))
 plot(unlist(ARR_DC[[2]]), type = 'l', ylab = "DC", xlab = "Iter", col = "purple",
-       main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_DC[[2]]))) / S, 3)))
+       main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_DC[[2]]))) / S, 2), " ", "ESS = ", round(effectiveSize(unlist(HEALTHY_DELTA[[2]][j])),2)))
 acf(unlist(ARR_DC[[2]]), ylab = "DC", main = "")
 
 par(mfrow = c(1,2))
 plot(unlist(ARR_TAO[[2]]), type = 'l', ylab = "Tao", xlab = "Iter", col = "purple",
-    main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_TAO[[2]]))) / S, 3)))
+    main = paste("Acceptance ratio =", round(length(unique(unlist(ARR_TAO[[2]]))) / S, 2), "  ", "ESS = ", round(effectiveSize(unlist(HEALTHY_DELTA[[2]][j])),2)))
 acf(unlist(ARR_TAO[[2]]), ylab = "Tao", main = "")
 ```
 

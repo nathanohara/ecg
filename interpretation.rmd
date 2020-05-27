@@ -202,7 +202,14 @@ for (i in 1:12){
 
   comb_data = rbind(healthy_alphas, arr_alphas)
   print(comb_data %>%
-    ggplot() + geom_density(aes(x=alpha, fill = label), alpha = 0.5) + xlab(paste("alpha_",i,sep="")) + theme(legend.position = "none"))
+    ggplot() + 
+      geom_density(aes(x=alpha, fill = label), alpha = 0.5) + 
+      xlab(paste("alpha_",i,sep="")) + 
+      theme(legend.position = "none", 
+            axis.title.x = element_text(face = "bold", size = 16),
+            axis.title.y = element_text(size = 16),
+            axis.text = element_text(size = 16))
+  )
 }
 ```
 
@@ -217,7 +224,14 @@ for (i in 1:17){
 
   comb_data = rbind(healthy_deltas, arr_deltas)
   print(comb_data %>%
-    ggplot() + geom_density(aes(x=delta, fill = label), alpha = 0.5) + xlab(paste("delta_",i,sep="")) + theme(legend.position = "none"))
+    ggplot() + 
+      geom_density(aes(x=delta, fill = label), alpha = 0.5) + 
+      xlab(paste("delta_",i,sep="")) + 
+      theme(legend.position = "none", 
+            axis.title.x = element_text(face = "bold", size = 16),
+            axis.title.y = element_text(size = 16),
+            axis.text = element_text(size = 16))
+  )
 }
 ```
 
@@ -231,7 +245,12 @@ arr_betas$label = "Arrhythmia"
 comb_data = rbind(healthy_betas, arr_betas)
 
 comb_data %>%
-  ggplot() + geom_density(aes(x=beta, fill = label), alpha = 0.5) + theme(legend.position = "none")
+  ggplot() + 
+  geom_density(aes(x=beta, fill = label), alpha = 0.5) + 
+  theme(legend.position = "none", 
+        axis.title.x = element_text(face = "bold", size = 16),
+        axis.title.y = element_text(size = 16),
+        axis.text = element_text(size = 16))
 ```
 
 
